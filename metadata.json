@@ -1,0 +1,6 @@
+{
+  "name": "SphereSMM SaaS Dashboard",
+  "description": "SaaS Social Media Management dashboard featuring AI caption generation and scheduled content publishing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

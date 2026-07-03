@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "socialAccount": {
+      "title": "Social Account",
+      "description": "A connected social media account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "platform": { "type": "string", "enum": ["twitter", "linkedin", "facebook", "instagram"] },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired"] },
+        "followerCount": { "type": "integer" },
+        "accessToken": { "type": "string" },
+        "externalAccountId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "platform", "username", "displayName", "avatarUrl", "status", "followerCount", "accessToken", "externalAccountId", "createdAt"]
+    },
+    "post": {
+      "title": "SMM Post",
+      "description": "A draft, scheduled, or published social media post",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "content": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "platforms": { "type": "array" },
+        "accountIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["draft", "scheduled", "published", "failed"] },
+        "scheduledFor": { "type": "string" },
+        "publishedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "content", "platforms", "accountIds", "status", "createdAt"]
+    },
+    "analyticSnapshot": {
+      "title": "Analytic Snapshot",
+      "description": "Metrics history for a connected account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "accountId": { "type": "string" },
+        "userId": { "type": "string" },
+        "platform": { "type": "string" },
+        "date": { "type": "string" },
+        "impressions": { "type": "integer" },
+        "engagements": { "type": "integer" },
+        "clicks": { "type": "integer" },
+        "followers": { "type": "integer" }
+      },
+      "required": ["id", "accountId", "userId", "platform", "date", "impressions", "engagements", "clicks", "followers"]
+    }
+  },
+  "firestore": {
+    "/socialAccounts/{accountId}": {
+      "schema": "socialAccount",
+      "description": "Social media accounts connected by users"
+    },
+    "/posts/{postId}": {
+      "schema": "post",
+      "description": "Posts created, scheduled or published"
+    },
+    "/analytics/{analyticId}": {
+      "schema": "analyticSnapshot",
+      "description": "Analytics snapshots for accounts"
+    }
+  }
+}
