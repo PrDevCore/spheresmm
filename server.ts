@@ -148,6 +148,61 @@ async function startServer() {
 
   app.use(express.json());
 
+  // ────────────────────────────────────────────────────────────────────────────
+  // GET /api/data-deletion
+  //
+  // Meta App Data Deletion Callback URL
+  // Used in: Meta Developer Dashboard → App Settings → User Data Deletion
+  // This endpoint serves as a live URL that Meta requires for app review.
+  // When a user requests data deletion, Meta redirects to this URL.
+  // The response includes a deletion request confirmation code.
+  // ────────────────────────────────────────────────────────────────────────────
+  app.get("/api/data-deletion", (req, res) => {
+    const confirmationCode = `del_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    
+    res.status(200).json({
+      url: `${process.env.APP_URL || "https://spheresmm.onrender.com"}/data-deletion`,
+      confirmation_code: confirmationCode,
+      status: "received",
+      message: "Your data deletion request has been received. We will process it within 30 days. Please contact prdevcore@email.com with your account email and this confirmation code to complete the process.",
+      confirmation_code_note: "Please save this confirmation code for your records."
+    });
+  });
+
+  // Also serve a human-readable HTML page at /data-deletion
+  app.get("/data-deletion", (req, res) => {
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SphereSMM — Data Deletion</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+          .card { background: white; border-radius: 24px; padding: 40px; max-width: 500px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); text-align: center; }
+          h1 { font-size: 24px; font-weight: 900; letter-spacing: -0.02em; text-transform: uppercase; color: #0f172a; }
+          p { font-size: 14px; color: #64748b; line-height: 1.6; }
+          .code { background: #f1f5f9; padding: 8px 16px; border-radius: 8px; font-family: monospace; font-size: 12px; word-break: break-all; }
+          .btn { display: inline-block; padding: 12px 24px; background: #0f172a; color: white; text-decoration: none; border-radius: 12px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Data Deletion</h1>
+          <p>To request deletion of your SphereSMM Dashboard data, send an email to <strong>prdevcore@email.com</strong> with:</p>
+          <ul style="text-align: left; font-size: 13px; color: #475569; line-height: 1.8;">
+            <li><strong>Subject:</strong> Data Deletion Request</li>
+            <li><strong>Body:</strong> Your account email address and Firebase User ID</li>
+          </ul>
+          <p style="font-size: 12px;">We will process all requests within 30 days. You will receive a confirmation email once complete.</p>
+          <a href="mailto:prdevcore@email.com?subject=Data%20Deletion%20Request" class="btn">Request Deletion</a>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
   app.post("/api/generate-captions", async (req, res) => {
     try {
       const { topic, platform, tone, length, hashtagsCount } = req.body;
