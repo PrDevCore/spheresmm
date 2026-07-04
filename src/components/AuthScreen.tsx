@@ -178,13 +178,6 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
               </button>
             </div>
 
-            {/* Firebase configuration hint */}
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[10px] text-amber-800 leading-relaxed font-medium flex items-start space-x-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-              <span>
-                <strong>Setup required:</strong> Enable&nbsp;Facebook&nbsp;and&nbsp;Google providers in the&nbsp;Firebase&nbsp;Console → Authentication → Sign-in&nbsp;providers for these buttons to work. Meta App ID for client-side OAuth (response_type=token flow).
-              </span>
-            </div>
           </div>
 
         <div className="relative flex py-1 items-center">
