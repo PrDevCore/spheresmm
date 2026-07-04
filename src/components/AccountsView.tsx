@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Plus,
   Trash2,
@@ -9,7 +9,9 @@ import {
   ShieldAlert,
   RefreshCw,
   Lock,
-  KeyRound
+  KeyRound,
+  Loader2,
+  CheckCircle2
 } from "lucide-react";
 import { SocialAccount, SocialPlatform } from "../types";
 
@@ -30,14 +32,7 @@ const colors = {
   twitter: "bg-black border-b-4 border-slate-800",
   linkedin: "bg-blue-600 border-b-4 border-blue-800",
   instagram: "bg-pink-600 border-b-4 border-pink-800",
-  facebook: "bg-indigo-600 border-b-4 border-indigo-800"
-};
-
-const platformHelp: Record<SocialPlatform, string> = {
-  twitter: "Use an X OAuth 2.0 user access token with tweet.write scope. Account ID can be your X user ID.",
-  linkedin: "Use a LinkedIn member or organization token. Account ID must be an author URN like urn:li:person:{id} or urn:li:organization:{id}.",
-  facebook: "Use a Facebook Page access token. Account ID must be the Page ID.",
-  instagram: "Use a Meta token for an Instagram Business account. Account ID must be the IG Business Account ID; publishing requires a public media URL."
+  facebook: "bg-[#1877F2] border-b-4 border-[#1565C0]"
 };
 
 export default function AccountsView({
@@ -45,11 +40,12 @@ export default function AccountsView({
   onConnectAccount,
   onDisconnectAccount
 }: AccountsViewProps) {
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    platform: "twitter" as SocialPlatform,
+  const [showConnectPanel, setShowConnectPanel] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
+  const [connectSuccess, setConnectSuccess] = useState("");
+  const [manualPlatform, setManualPlatform] = useState<SocialPlatform | null>(null);
+  const [manualForm, setManualForm] = useState({
     username: "",
     displayName: "",
     externalAccountId: "",
@@ -57,46 +53,170 @@ export default function AccountsView({
     avatarUrl: "",
     followerCount: "0"
   });
+  const [isManualSubmitting, setIsManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState("");
+  const popupRef = useRef<Window | null>(null);
+  const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
 
-  const updateForm = (key: keyof typeof form, value: string) => {
-    setForm((current) => ({ ...current, [key]: value }));
-  };
+  useEffect(() => {
+    return () => {
+      if (listenerRef.current) {
+        window.removeEventListener("message", listenerRef.current);
+        listenerRef.current = null;
+      }
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close();
+      }
+    };
+  }, []);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!form.username || !form.displayName || !form.externalAccountId || !form.accessToken) {
-      setError("Username, display name, platform account ID, and access token are required.");
+  const handleFacebookConnect = () => {
+    const appId = import.meta.env.VITE_META_APP_ID || "";
+    if (!appId) {
+      setConnectError("VITE_META_APP_ID is not configured.");
       return;
     }
 
-    setError("");
-    setIsSubmitting(true);
+    setIsConnecting(true);
+    setConnectError("");
+    setConnectSuccess("");
+
+    const redirectUri = `${window.location.origin}/oauth/callback`;
+    const scopes = "pages_show_list,pages_manage_posts,pages_read_engagement";
+
+    const oauthUrl = `https://www.facebook.com/v23.0/dialog/oauth?` +
+      `client_id=${appId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent(scopes)}` +
+      `&state=facebook_pages`;
+
+    const messageHandler = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      const { type, code, error: oauthError } = event.data || {};
+
+      if (type === "META_OAUTH_CODE" && code) {
+        try {
+          const response = await fetch("/api/meta/connect-pages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, redirect_uri: redirectUri })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to fetch pages.");
+          }
+
+          if (!data.pages || data.pages.length === 0) {
+            setConnectError(data.message || "No Facebook Pages found. Create a Facebook Page first.");
+            setIsConnecting(false);
+            return;
+          }
+
+          let connected = 0;
+          for (const page of data.pages) {
+            const alreadyConnected = accounts.some(
+              (a) => a.platform === "facebook" && a.externalAccountId === page.pageId
+            );
+            if (alreadyConnected) continue;
+
+            await onConnectAccount({
+              platform: "facebook",
+              username: page.name.toLowerCase().replace(/\s+/g, ""),
+              displayName: page.name,
+              avatarUrl: page.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(page.name)}&background=1877F2&color=fff`,
+              status: "active",
+              followerCount: 0,
+              accessToken: page.accessToken,
+              externalAccountId: page.pageId
+            });
+            connected++;
+          }
+
+          setConnectSuccess(`Connected ${connected} Facebook Page${connected !== 1 ? "s" : ""}.`);
+          setShowConnectPanel(false);
+        } catch (err: any) {
+          setConnectError(err.message || "Failed to connect Facebook pages.");
+        } finally {
+          setIsConnecting(false);
+        }
+
+        if (listenerRef.current) {
+          window.removeEventListener("message", listenerRef.current);
+          listenerRef.current = null;
+        }
+      } else if (type === "META_OAUTH_ERROR") {
+        setConnectError(oauthError || "Authorization was cancelled.");
+        setIsConnecting(false);
+        if (listenerRef.current) {
+          window.removeEventListener("message", listenerRef.current);
+          listenerRef.current = null;
+        }
+      }
+    };
+
+    window.addEventListener("message", messageHandler);
+    listenerRef.current = messageHandler;
+
+    const popup = window.open(
+      oauthUrl,
+      "MetaOAuth",
+      "width=600,height=700,left=200,top=100,scrollbars=yes"
+    );
+
+    if (!popup || popup.closed) {
+      setConnectError("Popup was blocked. Allow popups for this site.");
+      setIsConnecting(false);
+      window.removeEventListener("message", messageHandler);
+      listenerRef.current = null;
+      return;
+    }
+
+    popupRef.current = popup;
+
+    const pollTimer = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(pollTimer);
+        if (listenerRef.current) {
+          setConnectError("Authorization window was closed before completing.");
+          setIsConnecting(false);
+          window.removeEventListener("message", listenerRef.current);
+          listenerRef.current = null;
+        }
+      }
+    }, 500);
+  };
+
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualForm.username || !manualForm.displayName || !manualForm.externalAccountId || !manualForm.accessToken) {
+      setManualError("All fields except avatar and follower count are required.");
+      return;
+    }
+
+    setManualError("");
+    setIsManualSubmitting(true);
     try {
       await onConnectAccount({
-        platform: form.platform,
-        username: form.username.replace("@", ""),
-        displayName: form.displayName,
-        avatarUrl: form.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(form.displayName)}&background=111827&color=fff`,
+        platform: manualPlatform!,
+        username: manualForm.username.replace("@", ""),
+        displayName: manualForm.displayName,
+        avatarUrl: manualForm.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(manualForm.displayName)}&background=111827&color=fff`,
         status: "active",
-        followerCount: Number.parseInt(form.followerCount, 10) || 0,
-        accessToken: form.accessToken,
-        externalAccountId: form.externalAccountId
+        followerCount: Number.parseInt(manualForm.followerCount, 10) || 0,
+        accessToken: manualForm.accessToken,
+        externalAccountId: manualForm.externalAccountId
       });
-      setForm({
-        platform: "twitter",
-        username: "",
-        displayName: "",
-        externalAccountId: "",
-        accessToken: "",
-        avatarUrl: "",
-        followerCount: "0"
-      });
-      setShowAddForm(false);
+      setManualForm({ username: "", displayName: "", externalAccountId: "", accessToken: "", avatarUrl: "", followerCount: "0" });
+      setManualPlatform(null);
+      setShowConnectPanel(false);
     } catch (err: any) {
-      console.error("Failed to connect channel:", err);
-      setError(err.message || "Failed to save social channel.");
+      setManualError(err.message || "Failed to save channel.");
     } finally {
-      setIsSubmitting(false);
+      setIsManualSubmitting(false);
     }
   };
 
@@ -108,129 +228,209 @@ export default function AccountsView({
           <h1 className="text-6xl font-black tracking-tighter mt-1 text-slate-950 uppercase">CHANNELS.</h1>
         </div>
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
+          onClick={() => { setShowConnectPanel(!showConnectPanel); setConnectError(""); setConnectSuccess(""); setManualPlatform(null); }}
           className="px-6 py-3 bg-black hover:bg-slate-800 text-white text-xs font-black tracking-widest uppercase rounded-full shadow-lg transition-all duration-200 flex items-center space-x-2 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>{showAddForm ? "Close Module" : "Connect Channel"}</span>
+          <span>{showConnectPanel ? "Close" : "Connect Channel"}</span>
         </button>
       </div>
 
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-xs text-red-600 font-medium">
-          {error}
+      {connectSuccess && (
+        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-xs text-emerald-600 font-medium flex items-center space-x-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{connectSuccess}</span>
         </div>
       )}
 
-      {showAddForm && (
-        <form onSubmit={handleSubmit} className="bg-white border-2 border-slate-200/80 rounded-3xl p-8 max-w-5xl animate-fade-in space-y-6 shadow-sm">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
-              <KeyRound className="w-4 h-4 text-indigo-600" />
-            </div>
-            <h3 className="text-xl font-black italic tracking-tight uppercase text-slate-900">Add Real Publishing Credentials</h3>
-          </div>
+      {showConnectPanel && (
+        <div className="bg-white border-2 border-slate-200/80 rounded-3xl p-8 max-w-5xl animate-fade-in space-y-6 shadow-sm">
+          {!manualPlatform ? (
+            <>
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+                  <KeyRound className="w-4 h-4 text-indigo-600" />
+                </div>
+                <h3 className="text-xl font-black italic tracking-tight uppercase text-slate-900">Connect a Channel</h3>
+              </div>
 
-          <p className="text-xs text-slate-500 font-medium leading-relaxed">
-            Credentials are used for live publishing. Use platform-issued access tokens and the matching Page ID, Instagram Business Account ID, X user ID, or LinkedIn author URN.
-          </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Facebook — one-click OAuth */}
+                <button
+                  onClick={handleFacebookConnect}
+                  disabled={isConnecting}
+                  className="flex items-center justify-center space-x-3 p-5 rounded-2xl border-2 border-[#1877F2]/20 bg-[#1877F2]/5 hover:bg-[#1877F2]/10 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isConnecting ? (
+                    <Loader2 className="w-5 h-5 text-[#1877F2] animate-spin" />
+                  ) : (
+                    <Facebook className="w-5 h-5 text-[#1877F2]" />
+                  )}
+                  <div className="text-left">
+                    <span className="text-sm font-black text-slate-900 block">
+                      {isConnecting ? "Connecting..." : "Connect Facebook Pages"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">One-click OAuth — auto-discovers your pages</span>
+                  </div>
+                </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Platform</span>
-              <select
-                value={form.platform}
-                onChange={(e) => updateForm("platform", e.target.value as SocialPlatform)}
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              >
-                <option value="twitter">X / Twitter</option>
-                <option value="linkedin">LinkedIn</option>
-                <option value="facebook">Facebook Page</option>
-                <option value="instagram">Instagram Business</option>
-              </select>
-            </label>
+                {/* Instagram — uses same Facebook pages */}
+                <button
+                  onClick={handleFacebookConnect}
+                  disabled={isConnecting}
+                  className="flex items-center justify-center space-x-3 p-5 rounded-2xl border-2 border-pink-500/20 bg-pink-500/5 hover:bg-pink-500/10 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isConnecting ? (
+                    <Loader2 className="w-5 h-5 text-pink-600 animate-spin" />
+                  ) : (
+                    <Instagram className="w-5 h-5 text-pink-600" />
+                  )}
+                  <div className="text-left">
+                    <span className="text-sm font-black text-slate-900 block">
+                      {isConnecting ? "Connecting..." : "Connect Instagram"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">Uses Facebook Pages — requires Business account</span>
+                  </div>
+                </button>
 
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Platform Account ID</span>
-              <input
-                value={form.externalAccountId}
-                onChange={(e) => updateForm("externalAccountId", e.target.value)}
-                placeholder="Page ID, IG account ID, X user ID, or LinkedIn URN"
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
+                {/* Twitter — manual */}
+                <button
+                  onClick={() => setManualPlatform("twitter")}
+                  className="flex items-center justify-center space-x-3 p-5 rounded-2xl border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all cursor-pointer"
+                >
+                  <Twitter className="w-5 h-5 text-black" />
+                  <div className="text-left">
+                    <span className="text-sm font-black text-slate-900 block">Connect X / Twitter</span>
+                    <span className="text-[10px] text-slate-400 font-medium">Manual — paste your API bearer token</span>
+                  </div>
+                </button>
 
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Username / Handle</span>
-              <input
-                value={form.username}
-                onChange={(e) => updateForm("username", e.target.value)}
-                placeholder="@brand"
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
+                {/* LinkedIn — manual */}
+                <button
+                  onClick={() => setManualPlatform("linkedin")}
+                  className="flex items-center justify-center space-x-3 p-5 rounded-2xl border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all cursor-pointer"
+                >
+                  <Linkedin className="w-5 h-5 text-blue-600" />
+                  <div className="text-left">
+                    <span className="text-sm font-black text-slate-900 block">Connect LinkedIn</span>
+                    <span className="text-[10px] text-slate-400 font-medium">Manual — paste your OAuth token</span>
+                  </div>
+                </button>
+              </div>
 
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Display Name</span>
-              <input
-                value={form.displayName}
-                onChange={(e) => updateForm("displayName", e.target.value)}
-                placeholder="Brand or account name"
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
+              {connectError && (
+                <p className="text-xs text-red-500 font-medium p-3 bg-red-50 rounded-xl">{connectError}</p>
+              )}
 
-            <label className="space-y-1.5 md:col-span-2">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Access Token</span>
-              <input
-                type="password"
-                value={form.accessToken}
-                onChange={(e) => updateForm("accessToken", e.target.value)}
-                placeholder="Paste the platform OAuth access token"
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
+              <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                Facebook and Instagram use OAuth — your access tokens are exchanged server-side and stored in your Firestore workspace. The client secret never reaches the browser.
+              </p>
+            </>
+          ) : (
+            /* Manual form for Twitter/LinkedIn */
+            <form onSubmit={handleManualSubmit} className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+                    {React.createElement(platformIcons[manualPlatform], { className: "w-4 h-4" })}
+                  </div>
+                  <h3 className="text-xl font-black italic tracking-tight uppercase text-slate-900">
+                    Connect {manualPlatform === "twitter" ? "X / Twitter" : "LinkedIn"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManualPlatform(null)}
+                  className="text-xs font-black text-slate-400 hover:text-slate-600 uppercase tracking-wider cursor-pointer"
+                >
+                  Back
+                </button>
+              </div>
 
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Avatar URL</span>
-              <input
-                value={form.avatarUrl}
-                onChange={(e) => updateForm("avatarUrl", e.target.value)}
-                placeholder="Optional public image URL"
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Platform Account ID</span>
+                  <input
+                    value={manualForm.externalAccountId}
+                    onChange={(e) => setManualForm({ ...manualForm, externalAccountId: e.target.value })}
+                    placeholder={manualPlatform === "twitter" ? "X user ID" : "URN like urn:li:person:{id}"}
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
 
-            <label className="space-y-1.5">
-              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Follower Count</span>
-              <input
-                type="number"
-                min={0}
-                value={form.followerCount}
-                onChange={(e) => updateForm("followerCount", e.target.value)}
-                className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
-            </label>
-          </div>
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Username / Handle</span>
+                  <input
+                    value={manualForm.username}
+                    onChange={(e) => setManualForm({ ...manualForm, username: e.target.value })}
+                    placeholder="@handle"
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
 
-          <div className="bg-indigo-50 border-2 border-indigo-100 rounded-2xl p-4 text-xs text-indigo-950 leading-relaxed">
-            {platformHelp[form.platform]}
-          </div>
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Display Name</span>
+                  <input
+                    value={manualForm.displayName}
+                    onChange={(e) => setManualForm({ ...manualForm, displayName: e.target.value })}
+                    placeholder="Account name"
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
 
-          <div className="flex items-center justify-between border-t border-slate-100 pt-5 gap-4">
-            <div className="flex items-center space-x-2 text-[10px] font-black text-slate-400 tracking-widest uppercase">
-              <Lock className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Stored in your Firestore user workspace</span>
-            </div>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-3 bg-black hover:bg-slate-800 disabled:bg-slate-300 text-white text-xs font-black tracking-widest uppercase rounded-xl shadow-md transition-all cursor-pointer"
-            >
-              {isSubmitting ? "Saving..." : "Save Channel"}
-            </button>
-          </div>
-        </form>
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Access Token</span>
+                  <input
+                    type="password"
+                    value={manualForm.accessToken}
+                    onChange={(e) => setManualForm({ ...manualForm, accessToken: e.target.value })}
+                    placeholder="Paste your API token"
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
+
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Avatar URL</span>
+                  <input
+                    value={manualForm.avatarUrl}
+                    onChange={(e) => setManualForm({ ...manualForm, avatarUrl: e.target.value })}
+                    placeholder="Optional"
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
+
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Follower Count</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={manualForm.followerCount}
+                    onChange={(e) => setManualForm({ ...manualForm, followerCount: e.target.value })}
+                    className="w-full bg-slate-50 border-2 border-slate-100 p-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  />
+                </label>
+              </div>
+
+              {manualError && (
+                <p className="text-xs text-red-500 font-medium p-3 bg-red-50 rounded-xl">{manualError}</p>
+              )}
+
+              <div className="flex items-center justify-between border-t border-slate-100 pt-5">
+                <div className="flex items-center space-x-2 text-[10px] font-black text-slate-400 tracking-widest uppercase">
+                  <Lock className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Stored in your Firestore workspace</span>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isManualSubmitting}
+                  className="px-6 py-3 bg-black hover:bg-slate-800 disabled:bg-slate-300 text-white text-xs font-black tracking-widest uppercase rounded-xl shadow-md transition-all cursor-pointer"
+                >
+                  {isManualSubmitting ? "Saving..." : "Save Channel"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
@@ -239,7 +439,7 @@ export default function AccountsView({
             <ShieldAlert className="w-12 h-12 text-slate-300 mx-auto mb-4" />
             <h4 className="text-slate-800 font-black uppercase text-xs tracking-wider">No accounts connected yet</h4>
             <p className="text-slate-400 text-xs mt-1.5 max-w-sm mx-auto leading-relaxed">
-              Add real social account credentials before composing or publishing campaigns.
+              Click "Connect Channel" to link your Facebook Pages, Instagram, Twitter, or LinkedIn accounts.
             </p>
           </div>
         ) : (

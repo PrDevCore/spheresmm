@@ -494,6 +494,123 @@ Return the response strictly as a JSON object adhering to this schema:
   });
 
   // ────────────────────────────────────────────────────────────────────────────
+  // POST /api/meta/connect-pages
+  //
+  // One-click Facebook Page connection:
+  //   1. Exchanges authorization code for user access token
+  //   2. Upgrades to long-lived token
+  //   3. Fetches all Facebook Pages the user manages
+  //   4. Gets long-lived page access tokens for each page
+  //   5. Returns pages with tokens — client saves to Firestore
+  // ────────────────────────────────────────────────────────────────────────────
+  app.post("/api/meta/connect-pages", async (req, res) => {
+    try {
+      const { code, redirect_uri } = req.body;
+
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ error: "Authorization code is required." });
+      }
+
+      const appId = process.env.VITE_META_APP_ID;
+      const appSecret = process.env.META_APP_SECRET;
+
+      if (!appId || !appSecret) {
+        return res.status(500).json({ error: "Meta App ID or App Secret is not configured." });
+      }
+
+      const effectiveRedirectUri = redirect_uri || `${process.env.APP_URL || "http://localhost:3000"}/oauth/callback`;
+
+      // Step 1: Exchange code for short-lived user access token
+      const tokenUrl = new URL("https://graph.facebook.com/v23.0/oauth/access_token");
+      tokenUrl.searchParams.set("client_id", appId);
+      tokenUrl.searchParams.set("client_secret", appSecret);
+      tokenUrl.searchParams.set("redirect_uri", effectiveRedirectUri);
+      tokenUrl.searchParams.set("code", code);
+
+      const tokenRes = await fetch(tokenUrl.toString());
+      const tokenData = await tokenRes.json();
+
+      if (tokenData.error) {
+        return res.status(400).json({ error: tokenData.error.message || "Token exchange failed." });
+      }
+
+      const shortLivedToken = tokenData.access_token;
+
+      // Step 2: Exchange for long-lived user access token
+      const longTokenUrl = new URL("https://graph.facebook.com/v23.0/oauth/access_token");
+      longTokenUrl.searchParams.set("grant_type", "fb_exchange_token");
+      longTokenUrl.searchParams.set("client_id", appId);
+      longTokenUrl.searchParams.set("client_secret", appSecret);
+      longTokenUrl.searchParams.set("fb_exchange_token", shortLivedToken);
+
+      const longTokenRes = await fetch(longTokenUrl.toString());
+      const longTokenData = await longTokenRes.json();
+
+      const userToken = longTokenData.access_token || shortLivedToken;
+
+      // Step 3: Fetch pages the user manages
+      const pagesRes = await fetch(`https://graph.facebook.com/v23.0/me/accounts?access_token=${encodeURIComponent(userToken)}`);
+      const pagesData = await pagesRes.json();
+
+      if (pagesData.error) {
+        return res.status(400).json({ error: pagesData.error.message || "Failed to fetch pages." });
+      }
+
+      if (!pagesData.data || pagesData.data.length === 0) {
+        return res.status(200).json({ pages: [], message: "No Facebook Pages found. Create a Facebook Page first, then try again." });
+      }
+
+      // Step 4: For each page, get a long-lived page access token
+      const pages = await Promise.all(
+        pagesData.data.map(async (page: any) => {
+          let pageToken = page.access_token;
+
+          try {
+            const pageTokenUrl = new URL("https://graph.facebook.com/v23.0/oauth/access_token");
+            pageTokenUrl.searchParams.set("grant_type", "fb_exchange_token");
+            pageTokenUrl.searchParams.set("client_id", appId);
+            pageTokenUrl.searchParams.set("client_secret", appSecret);
+            pageTokenUrl.searchParams.set("fb_exchange_token", pageToken);
+
+            const pageTokenRes = await fetch(pageTokenUrl.toString());
+            const pageTokenData = await pageTokenRes.json();
+
+            if (pageTokenData.access_token) {
+              pageToken = pageTokenData.access_token;
+            }
+          } catch {
+            // Fall back to the original page token
+          }
+
+          return {
+            pageId: page.id,
+            name: page.name,
+            accessToken: pageToken
+          };
+        })
+      );
+
+      // Step 5: Fetch profile pictures for each page
+      const pagesWithAvatars = await Promise.all(
+        pages.map(async (page) => {
+          try {
+            const picRes = await fetch(`https://graph.facebook.com/v23.0/${page.pageId}/picture?width=200&height=200&access_token=${encodeURIComponent(page.accessToken)}`);
+            const picUrl = picRes.url;
+            return { ...page, avatarUrl: picUrl };
+          } catch {
+            return { ...page, avatarUrl: "" };
+          }
+        })
+      );
+
+      res.json({ pages: pagesWithAvatars });
+    } catch (error: any) {
+      console.error("Meta connect pages error:", error);
+      res.status(500).json({ error: error.message || "Failed to connect Facebook pages." });
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
   // POST /api/posts/publish
   // 
   // STATELESS PUBLISH ENDPOINT — absolute garbage collection guaranteed:
