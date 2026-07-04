@@ -203,6 +203,165 @@ async function startServer() {
     `);
   });
 
+  // ────────────────────────────────────────────────────────────────────────────
+  // Privacy Policy page
+  // Required for Meta Developer Dashboard → App Settings → Privacy Policy URL
+  // ────────────────────────────────────────────────────────────────────────────
+  app.get("/privacy", (req, res) => {
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SphereSMM — Privacy Policy</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; display: flex; justify-content: center; padding: 40px 20px; min-height: 100vh; margin: 0; }
+          .card { background: white; border-radius: 24px; padding: 48px; max-width: 640px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+          h1 { font-size: 28px; font-weight: 900; letter-spacing: -0.02em; text-transform: uppercase; color: #0f172a; margin-bottom: 8px; }
+          .updated { font-size: 12px; color: #94a3b8; font-weight: 600; margin-bottom: 32px; }
+          h2 { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 28px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+          p, li { font-size: 14px; color: #475569; line-height: 1.7; }
+          ul { padding-left: 20px; margin: 8px 0; }
+          li { margin-bottom: 6px; }
+          table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+          th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+          th { font-weight: 700; color: #0f172a; }
+          td { color: #475569; }
+          strong { color: #0f172a; }
+          a { color: #4f46e5; text-decoration: none; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Privacy Policy</h1>
+          <p class="updated">Last updated: July 2026</p>
+
+          <h2>Data We Collect</h2>
+          <ul>
+            <li><strong>Email address and display name</strong> — for authentication via Firebase Auth</li>
+            <li><strong>Post content and media URLs</strong> — content you compose, schedule, or publish through the dashboard</li>
+            <li><strong>Social account references</strong> — platform, username, display name, avatar URL (no access tokens stored on servers)</li>
+            <li><strong>Analytics data</strong> — impressions, engagements, clicks derived from published posts</li>
+          </ul>
+
+          <h2>How We Use Your Data</h2>
+          <ul>
+            <li>To authenticate you via Firebase Auth (email/password, Google, Facebook)</li>
+            <li>To publish social media posts on your behalf to platforms you authorize (X/Twitter, Facebook, Instagram, LinkedIn)</li>
+            <li>To generate AI caption suggestions via Google Gemini API</li>
+            <li>To display analytics and performance metrics</li>
+          </ul>
+
+          <h2>Data Storage</h2>
+          <ul>
+            <li><strong>Authentication data</strong> is handled by Firebase (Google Cloud infrastructure)</li>
+            <li><strong>Post drafts and schedules</strong> are stored in Firestore (Google Cloud)</li>
+            <li><strong>Social media access tokens</strong> are NEVER stored on our servers — they exist only in your browser memory during a publishing session and are immediately garbage collected</li>
+          </ul>
+
+          <h2>Third-Party Services</h2>
+          <table>
+            <tr><th>Service</th><th>Purpose</th></tr>
+            <tr><td>Firebase (Google)</td><td>Authentication, Firestore database</td></tr>
+            <tr><td>Google Gemini AI</td><td>AI caption generation</td></tr>
+            <tr><td>Meta (Facebook/Instagram)</td><td>Publishing to connected accounts</td></tr>
+            <tr><td>X (Twitter)</td><td>Publishing tweets</td></tr>
+            <tr><td>LinkedIn</td><td>Publishing posts</td></tr>
+          </table>
+
+          <h2>Data Security</h2>
+          <ul>
+            <li>Access tokens are ephemeral — obtained fresh via OAuth popup at publish time</li>
+            <li>No tokens are written to disk, database, logs, or localStorage</li>
+            <li>Firestore security rules enforce per-user data isolation</li>
+            <li>All API calls use HTTPS encryption</li>
+          </ul>
+
+          <h2>Your Rights</h2>
+          <p>You can request deletion of your data at any time by emailing <strong>prdevcore@email.com</strong> with subject "Data Deletion Request" and your account email address. We will delete all associated data within 30 days.</p>
+
+          <h2>Contact</h2>
+          <p><strong>Email:</strong> <a href="mailto:prdevcore@email.com">prdevcore@email.com</a></p>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Terms of Service page
+  // Required for Meta Developer Dashboard → App Settings → Terms of Service URL
+  // ────────────────────────────────────────────────────────────────────────────
+  app.get("/terms", (req, res) => {
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SphereSMM — Terms of Service</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f3f4f6; display: flex; justify-content: center; padding: 40px 20px; min-height: 100vh; margin: 0; }
+          .card { background: white; border-radius: 24px; padding: 48px; max-width: 640px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+          h1 { font-size: 28px; font-weight: 900; letter-spacing: -0.02em; text-transform: uppercase; color: #0f172a; margin-bottom: 8px; }
+          .updated { font-size: 12px; color: #94a3b8; font-weight: 600; margin-bottom: 32px; }
+          h2 { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 28px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+          p, li { font-size: 14px; color: #475569; line-height: 1.7; }
+          ul { padding-left: 20px; margin: 8px 0; }
+          li { margin-bottom: 6px; }
+          strong { color: #0f172a; }
+          a { color: #4f46e5; text-decoration: none; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Terms of Service</h1>
+          <p class="updated">Last updated: July 2026</p>
+
+          <h2>1. Acceptance of Terms</h2>
+          <p>By using SphereSMM Dashboard ("the Service"), you agree to these Terms of Service. If you do not agree, do not use the Service.</p>
+
+          <h2>2. Description of Service</h2>
+          <p>SphereSMM Dashboard is a social media management tool that allows users to:</p>
+          <ul>
+            <li>Compose and schedule social media posts</li>
+            <li>Generate AI-powered captions using Google Gemini</li>
+            <li>Publish content to connected social media accounts (X/Twitter, Facebook, Instagram, LinkedIn)</li>
+            <li>View analytics and performance metrics</li>
+          </ul>
+
+          <h2>3. User Responsibilities</h2>
+          <ul>
+            <li>You are solely responsible for all content you publish through the Service</li>
+            <li>You must comply with each platform's Terms of Service (X/Twitter, Facebook, Instagram, LinkedIn)</li>
+            <li>You must not use the Service to publish harmful, illegal, or misleading content</li>
+            <li>You are responsible for maintaining the security of your account credentials</li>
+          </ul>
+
+          <h2>4. Third-Party Services</h2>
+          <p>The Service integrates with third-party platforms: Firebase (Google), Google Gemini AI, Meta (Facebook/Instagram), X (Twitter), and LinkedIn. We are not responsible for the availability, functionality, or terms of these third-party services.</p>
+
+          <h2>5. Limitation of Liability</h2>
+          <p>The Service is provided "as is" without warranty of any kind. We are not liable for any content published through the Service, damages or losses resulting from use or inability to use the Service, or actions taken by third-party platforms in response to published content.</p>
+
+          <h2>6. Intellectual Property</h2>
+          <p>You retain all rights to content you create and publish through the Service. We claim no ownership over your content.</p>
+
+          <h2>7. Termination</h2>
+          <p>We reserve the right to suspend or terminate access to the Service for violations of these terms or for misuse of the platform.</p>
+
+          <h2>8. Changes to Terms</h2>
+          <p>We may update these terms. Continued use of the Service after changes constitutes acceptance of the new terms.</p>
+
+          <h2>9. Contact</h2>
+          <p><strong>Email:</strong> <a href="mailto:prdevcore@email.com">prdevcore@email.com</a></p>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
   app.post("/api/generate-captions", async (req, res) => {
     try {
       const { topic, platform, tone, length, hashtagsCount } = req.body;
