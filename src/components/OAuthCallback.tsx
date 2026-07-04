@@ -2,20 +2,21 @@ import React, { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 /**
- * OAuthCallback
- * 
- * This is the redirect landing page for Meta OAuth with response_type=token.
- * 
- * When Meta redirects the user back here, the access token is in the URL
- * hash fragment (#access_token=...). This component:
- * 1. Reads the hash fragment
- * 2. Extracts the access token
- * 3. Posts it back to the opener window via postMessage
- * 4. Self-closes the popup
- * 
- * The token NEVER touches any server, database, log, or storage.
- * It exists only transiently in the browser URL and is immediately
- * relayed to the opener window, then the window closes.
+ * OAuthCallback — Authorization Code Flow
+ *
+ * When Meta redirects the user back here after authorization, the
+ * authorization code is in the URL query parameters:
+ *   /oauth/callback?code=XXXXX&state=facebook
+ *
+ * This component:
+ * 1. Reads the authorization code from query params
+ * 2. Posts it back to the opener window via postMessage
+ * 3. The opener (MetaOAuthButton) sends the code to the backend
+ * 4. The backend swaps the code + client_secret for an access token
+ * 5. Self-closes the popup
+ *
+ * The authorization code NEVER touches any server from this component.
+ * It is only relayed to the opener window for the exchange step.
  */
 export default function OAuthCallback() {
   const [status, setStatus] = useState<"processing" | "success" | "error">("processing");
@@ -23,77 +24,53 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     try {
-      // Parse the URL hash fragment
-      // After response_type=token, Meta redirects to:
-      //   /oauth/callback#access_token=EAAxxx...&expires_in=...&state=...
-      const hash = window.location.hash.substring(1); // Remove the leading #
-      
-      if (!hash) {
-        // Check if there's an error in the URL query params (e.g. ?error=access_denied)
-        const params = new URLSearchParams(window.location.search);
-        const errorParam = params.get("error");
-        const errorReason = params.get("error_reason");
-        const errorDescription = params.get("error_description");
+      // The authorization code is in the URL query parameters (not hash fragment)
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const state = params.get("state"); // platform name passed in original request
+      const errorParam = params.get("error");
+      const errorReason = params.get("error_reason");
+      const errorDescription = params.get("error_description");
 
-        if (errorParam) {
-          setStatus("error");
-          setMessage(errorDescription || errorReason || "Authorization was denied.");
-          // Notify the opener window about the error
-          if (window.opener) {
-            window.opener.postMessage({
-              type: "META_OAUTH_ERROR",
-              error: errorDescription || errorReason || "User denied authorization."
-            }, window.origin);
-          }
-          return;
-        }
-
+      // Handle errors from Meta
+      if (errorParam) {
         setStatus("error");
-        setMessage("No authorization data received. The hash fragment is empty.");
-        return;
-      }
-
-      // Parse the hash fragment as query string parameters
-      const hashParams = new URLSearchParams(hash);
-      const accessToken = hashParams.get("access_token");
-      const expiresIn = hashParams.get("expires_in");
-      const state = hashParams.get("state"); // platform name passed in original request
-
-      if (!accessToken) {
-        setStatus("error");
-        setMessage("No access token found in the response.");
+        setMessage(errorDescription || errorReason || "Authorization was denied.");
         if (window.opener) {
           window.opener.postMessage({
             type: "META_OAUTH_ERROR",
-            error: "No access token in callback. The hash was: " + hash.substring(0, 50) + "..."
+            error: errorDescription || errorReason || "User denied authorization."
           }, window.origin);
         }
         return;
       }
 
-      // Success! Post the token back to the opener window
-      setStatus("success");
-      setMessage("Token received. You can close this window.");
-
-      if (window.opener) {
-        window.opener.postMessage({
-          type: "META_OAUTH_TOKEN",
-          token: accessToken,
-          platform: state || "facebook",
-          expiresIn: expiresIn || "unknown",
-          externalAccountId: hashParams.get("account_id") || undefined
-        }, window.origin);
-
-        // Clear the hash for security — token is gone from URL
-        window.location.hash = "";
-      } else {
-        // No opener — this shouldn't happen in normal flow
+      if (!code) {
         setStatus("error");
-        setMessage("This window was not opened by the application. Cannot relay token.");
+        setMessage("No authorization code received. The query parameters are empty.");
         return;
       }
 
-      // Close the popup after a brief delay so user sees success
+      // Success! Post the authorization code back to the opener window
+      setStatus("success");
+      setMessage("Authorization code received. Exchanging for access token...");
+
+      if (window.opener) {
+        window.opener.postMessage({
+          type: "META_OAUTH_CODE",
+          code: code,
+          platform: state || "facebook"
+        }, window.origin);
+
+        // Clear the authorization code from the URL for security
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else {
+        setStatus("error");
+        setMessage("This window was not opened by the application. Cannot relay authorization code.");
+        return;
+      }
+
+      // Close the popup after a brief delay
       setTimeout(() => {
         window.close();
       }, 1500);
@@ -121,7 +98,7 @@ export default function OAuthCallback() {
           <div className="space-y-4">
             <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
             <p className="text-slate-700 font-bold text-sm">Processing OAuth response...</p>
-            <p className="text-slate-400 text-xs">Extracting token from URL fragment</p>
+            <p className="text-slate-400 text-xs">Extracting authorization code from URL</p>
           </div>
         )}
 
@@ -132,7 +109,7 @@ export default function OAuthCallback() {
             </div>
             <p className="text-slate-800 font-black text-sm uppercase tracking-wider">Authorization Successful</p>
             <p className="text-slate-400 text-xs">
-              Token relayed to application. This window will close automatically.
+              Code relayed to application. Token exchange in progress. This window will close automatically.
             </p>
           </div>
         )}

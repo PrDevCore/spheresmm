@@ -51,7 +51,7 @@ export default function ComposerView({
   const [successState, setSuccessState] = useState(false);
 
   // Ephemeral OAuth tokens — exist only in React state, NEVER persisted
-  // These are obtained via MetaOAuthButton popup flow and destroyed on unmount
+  // These are obtained via MetaOAuthButton (authorization code flow → server exchange) and destroyed on unmount
   const [ephemeralTokens, setEphemeralTokens] = useState<Record<string, { token: string; externalAccountId?: string }>>({});
 
   // Set default selected accounts if accounts change
@@ -350,7 +350,7 @@ export default function ComposerView({
                   <span>Ephemeral Meta Authorization</span>
                 </div>
                 <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                  Authorize Meta platforms at publish time. Tokens are held in browser memory only — never stored on any server or database.
+                  Authorization code flow: the code is exchanged server-side for an access token. The client secret never reaches the browser.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {accounts.filter(a => a.platform === "facebook").length > 0 && (

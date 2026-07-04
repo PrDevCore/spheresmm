@@ -274,12 +274,73 @@ Return the response strictly as a JSON object adhering to this schema:
   });
 
   // ────────────────────────────────────────────────────────────────────────────
+  // POST /api/meta/exchange-token
+  //
+  // Authorization Code Exchange — swaps a short-lived authorization code for
+  // a long-lived access token via server-to-server call to Meta.
+  //
+  // Flow:
+  //   1. Browser opens Meta OAuth with response_type=code → user authorizes
+  //   2. Meta redirects to /oauth/callback?code=XXXXX&state=facebook
+  //   3. Browser posts the code here → server combines code + app_secret
+  //   4. Server calls GET https://graph.facebook.com/v23.0/oauth/access_token
+  //   5. Server returns the long-lived access token to the browser
+  //
+  // The client_secret NEVER reaches the browser — it lives only in server memory.
+  // ────────────────────────────────────────────────────────────────────────────
+  app.post("/api/meta/exchange-token", async (req, res) => {
+    try {
+      const { code, redirect_uri } = req.body;
+
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ error: "Authorization code is required." });
+      }
+
+      const appId = process.env.VITE_META_APP_ID;
+      const appSecret = process.env.META_APP_SECRET;
+
+      if (!appId || !appSecret) {
+        return res.status(500).json({ error: "Meta App ID or App Secret is not configured on the server." });
+      }
+
+      // Use the provided redirect_uri or fall back to the default
+      const effectiveRedirectUri = redirect_uri || `${process.env.APP_URL || "http://localhost:3000"}/oauth/callback`;
+
+      // Server-to-server call to Meta to exchange code for access token
+      const tokenUrl = new URL("https://graph.facebook.com/v23.0/oauth/access_token");
+      tokenUrl.searchParams.set("client_id", appId);
+      tokenUrl.searchParams.set("client_secret", appSecret);
+      tokenUrl.searchParams.set("redirect_uri", effectiveRedirectUri);
+      tokenUrl.searchParams.set("code", code);
+
+      const response = await fetch(tokenUrl.toString());
+      const data = await response.json();
+
+      if (data.error) {
+        const errorMessage = data.error.message || "Token exchange failed.";
+        console.error("Meta token exchange error:", data.error);
+        return res.status(400).json({ error: errorMessage });
+      }
+
+      // Return the access token to the browser (ephemeral — never persisted)
+      res.json({
+        access_token: data.access_token,
+        token_type: data.token_type,
+        expires_in: data.expires_in
+      });
+    } catch (error: any) {
+      console.error("Meta token exchange error:", error);
+      res.status(500).json({ error: error.message || "Failed to exchange authorization code for access token." });
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
   // POST /api/posts/publish
   // 
   // STATELESS PUBLISH ENDPOINT — absolute garbage collection guaranteed:
   //
   // 1. Tokens arrive ephemerally in req.body.accounts[].accessToken
-  //    (passed from browser's MetaOAuthButton popup flow — never from a database)
+  //    (passed from browser after authorization code exchange — never from a database)
   //
   // 2. NO database connections (Firestore, MongoDB, PostgreSQL, Redis) are
   //    initialized or connected inside this route handler

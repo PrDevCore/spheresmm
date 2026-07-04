@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { SocialPlatform } from "../types";
-import { Facebook, Camera, LogIn } from "lucide-react";
+import { Facebook, Camera } from "lucide-react";
 
 interface MetaOAuthButtonProps {
   platform: "facebook" | "instagram";
@@ -9,14 +9,14 @@ interface MetaOAuthButtonProps {
 }
 
 /**
- * MetaOAuthButton
- * 
- * Launches a Meta OAuth popup with response_type=token.
- * The access token is returned in the URL hash fragment (#access_token=...)
- * and captured via postMessage from the OAuth callback popup.
- * 
- * The token is NEVER stored in any database — it exists only in
- * browser memory (React useState) and is garbage collected on unmount.
+ * MetaOAuthButton — Authorization Code Flow
+ *
+ * The Handshake:  Client opens Meta OAuth popup with response_type=code
+ * The Response:   Meta returns a short-lived Authorization Code (not a token)
+ * The Exchange:   Client-side JS sends this code to our backend via POST
+ * The Verification: Server swaps code + client_secret for a long-lived access token
+ *
+ * The client_secret NEVER reaches the browser.
  */
 export default function MetaOAuthButton({ platform, onTokenReceived, disabled }: MetaOAuthButtonProps) {
   const [isAuthorizing, setIsAuthorizing] = useState(false);
@@ -24,7 +24,6 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
   const popupRef = useRef<Window | null>(null);
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
 
-  // Cleanup message listener on unmount (garbage collection)
   useEffect(() => {
     return () => {
       if (listenerRef.current) {
@@ -41,7 +40,6 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
     setError("");
     setIsAuthorizing(true);
 
-    // Meta App ID — should be configured via env var
     const appId = import.meta.env.VITE_META_APP_ID || "";
     if (!appId) {
       setError("VITE_META_APP_ID is not configured. Set it in .env.local");
@@ -49,34 +47,49 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
       return;
     }
 
-    // The redirect URI must point to our OAuth callback page
     const redirectUri = `${window.location.origin}/oauth/callback`;
 
-    // Build the OAuth dialog URL with response_type=token
-    // This returns the access token in the URL hash fragment, NOT via a server-side code exchange
     const scopes = platform === "instagram"
       ? "instagram_basic,instagram_content_publish,pages_read_engagement"
       : "pages_manage_posts,pages_read_engagement";
 
+    // The Handshake: open popup with response_type=code
     const oauthUrl = `https://www.facebook.com/v23.0/dialog/oauth?` +
       `client_id=${appId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&response_type=token` +
+      `&response_type=code` +
       `&scope=${encodeURIComponent(scopes)}` +
-      `&state=${platform}`; // pass platform in state so callback knows which platform
+      `&state=${platform}`;
 
-    // Set up the postMessage listener BEFORE opening the popup
-    const messageHandler = (event: MessageEvent) => {
-      // Security: only accept messages from our own origin
+    const messageHandler = async (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
 
-      const { type, token, platform: returnedPlatform, externalAccountId, error: oauthError } = event.data || {};
+      const { type, code, platform: returnedPlatform, externalAccountId, error: oauthError } = event.data || {};
 
-      if (type === "META_OAUTH_TOKEN" && token) {
-        // Token received — pass it to parent component
-        onTokenReceived(token, returnedPlatform || platform, externalAccountId);
-        setIsAuthorizing(false);
-        // Clean up listener
+      if (type === "META_OAUTH_CODE" && code) {
+        // The Response: received authorization code from popup
+        // The Exchange: send code to backend to swap for access token
+        try {
+          const response = await fetch("/api/meta/exchange-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, redirect_uri: redirectUri })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Token exchange failed.");
+          }
+
+          // The Verification: server returned the long-lived access token
+          onTokenReceived(data.access_token, returnedPlatform || platform, externalAccountId);
+          setIsAuthorizing(false);
+        } catch (err: any) {
+          setError(err.message || "Failed to exchange authorization code for access token.");
+          setIsAuthorizing(false);
+        }
+
         if (listenerRef.current) {
           window.removeEventListener("message", listenerRef.current);
           listenerRef.current = null;
@@ -94,7 +107,6 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
     window.addEventListener("message", messageHandler);
     listenerRef.current = messageHandler;
 
-    // Open the popup
     const popup = window.open(
       oauthUrl,
       "MetaOAuth",
@@ -111,14 +123,13 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
 
     popupRef.current = popup;
 
-    // Poll to detect if the user closed the popup without completing auth
     const pollTimer = setInterval(() => {
       if (popup.closed) {
         clearInterval(pollTimer);
-        if (isAuthorizing) {
+        if (listenerRef.current) {
           setError("Authorization window was closed before completing sign-in.");
           setIsAuthorizing(false);
-          window.removeEventListener("message", messageHandler);
+          window.removeEventListener("message", listenerRef.current);
           listenerRef.current = null;
         }
       }
@@ -158,7 +169,7 @@ export default function MetaOAuthButton({ platform, onTokenReceived, disabled }:
       )}
 
       <p className="text-[9px] text-slate-400 font-medium leading-relaxed px-1">
-        Opens a popup to Meta. Token is ephemeral — never stored on any server.
+        Authorization code flow — code is exchanged server-side. Client secret never reaches the browser.
       </p>
     </div>
   );

@@ -303,7 +303,7 @@ export default function App() {
         )}
       </main>
 
-      {/* OAuth callback route — rendered outside the main layout for popup redirects */}
+      {/* OAuth callback route — handles Meta authorization code relay for popup flow */}
       <Routes>
         <Route path="/oauth/callback" element={<OAuthCallback />} />
       </Routes>
